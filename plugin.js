@@ -1,22 +1,27 @@
 const BASE_URL = "https://pelisplushd.bz";
 
 const HEADERS = {
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "es-ES,es;q=0.9",
   "Referer": BASE_URL + "/"
 };
 
 function fixUrl(url) {
-  if (!url) return "";
-  if (url.startsWith("//")) return "https:" + url;
-  if (url.startsWith("/")) return BASE_URL + url;
-  return url;
+  if (!url || typeof url !== "string") return "";
+  const clean = url.trim();
+  if (clean.startsWith("//")) return "https:" + clean;
+  if (clean.startsWith("/")) return BASE_URL + clean;
+  return clean;
 }
 
 function cleanTitle(raw) {
+  if (!raw) return "";
   return raw
     .replace(/<[^>]+>/g, " ")
     .replace(/^VER\s+/i, "")
     .replace(/\s+Online\s+Gratis.*$/i, "")
+    .replace(/\s+\(\d{4}\)\s*$/i, "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -24,48 +29,78 @@ function cleanTitle(raw) {
 function extractCards(html) {
   const items = [];
   const seen = new Set();
+  if (!html) return items;
 
-  // Busca todos los bloques de enlace hacia /pelicula/, /serie/, /anime/ o /dorama/
-  const linkRegex = /<a\b[^>]*href=["']([^"']*\/(?:pelicula|serie|anime|dorama)\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  // Estrategia 1: Enlaces que envuelven la tarjeta e imagen
+  const cardRegex = /<a\b[^>]*href=["']([^"'#?]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   let match;
 
-  while ((match = linkRegex.exec(html)) !== null) {
-    const fullUrl = fixUrl(match[1]);
+  while ((match = cardRegex.exec(html)) !== null) {
+    const rawHref = match[1];
     const innerHtml = match[2];
 
+    if (!/\/(?:pelicula|serie|anime|dorama|ver)\//i.test(rawHref)) continue;
+    if (/\/temporada-\d+|\/episodio-\d+|\/capitulo-\d+/i.test(rawHref)) continue;
+
+    const fullUrl = fixUrl(rawHref);
     if (!fullUrl || seen.has(fullUrl)) continue;
 
-    // Extrae imagen (prioriza data-src sobre src)
     const imgMatch = innerHtml.match(/<img\b[^>]*>/i);
-    let poster = "";
-    let altTitle = "";
+    if (!imgMatch) continue;
 
-    if (imgMatch) {
+    const imgTag = imgMatch[0];
+    const dataSrc = imgTag.match(/data-src=["']([^"']+)["']/i);
+    const src = imgTag.match(/\bsrc=["']([^"']+)["']/i);
+    const alt = imgTag.match(/\balt=["']([^"']+)["']/i);
+
+    const poster = fixUrl((dataSrc && dataSrc[1]) || (src && src[1]) || "");
+    if (!poster || poster.startsWith("data:")) continue;
+
+    let title = cleanTitle((alt && alt[1]) || innerHtml);
+    if (!title || title.length < 2) continue;
+
+    seen.add(fullUrl);
+    const isMovie = /\/pelicula\//i.test(fullUrl);
+    items.push({
+      id: fullUrl,
+      ref: fullUrl,
+      kind: isMovie ? "movie" : "series",
+      title: title,
+      poster: poster
+    });
+  }
+
+  // Estrategia 2 (Respaldo): Si la imagen y el enlace están separados en contenedores hermanos
+  if (items.length === 0) {
+    const blockRegex = /<(?:article|div|li)\b[^>]*class=["'][^"']*(?:item|post|poster|card|col-)[^"']*["'][^>]*>([\s\S]*?)<\/(?:article|div|li)>/gi;
+    while ((match = blockRegex.exec(html)) !== null) {
+      const block = match[1];
+      const hrefMatch = block.match(/<a\b[^>]*href=["']([^"'#?]+)["']/i);
+      const imgMatch = block.match(/<img\b[^>]*>/i);
+      if (!hrefMatch || !imgMatch) continue;
+
+      const fullUrl = fixUrl(hrefMatch[1]);
+      if (!fullUrl || seen.has(fullUrl)) continue;
+      if (!/\/(?:pelicula|serie|anime|dorama)\//i.test(fullUrl)) continue;
+
       const imgTag = imgMatch[0];
       const dataSrc = imgTag.match(/data-src=["']([^"']+)["']/i);
       const src = imgTag.match(/\bsrc=["']([^"']+)["']/i);
       const alt = imgTag.match(/\balt=["']([^"']+)["']/i);
 
-      poster = fixUrl((dataSrc && dataSrc[1]) || (src && src[1]) || "");
-      altTitle = alt ? alt[1] : "";
-    }
+      const poster = fixUrl((dataSrc && dataSrc[1]) || (src && src[1]) || "");
+      const title = cleanTitle((alt && alt[1]) || block);
 
-    // Extrae título desde el texto interno o el atributo alt
-    let title = cleanTitle(innerHtml);
-    if (!title || title.length < 2) {
-      title = cleanTitle(altTitle);
-    }
-
-    if (title && poster) {
-      seen.add(fullUrl);
-      const isMovie = fullUrl.includes("/pelicula/");
-      items.push({
-        id: fullUrl,
-        ref: fullUrl,
-        kind: isMovie ? "movie" : "series",
-        title: title,
-        poster: poster
-      });
+      if (poster && !poster.startsWith("data:") && title && title.length >= 2) {
+        seen.add(fullUrl);
+        items.push({
+          id: fullUrl,
+          ref: fullUrl,
+          kind: /\/pelicula\//i.test(fullUrl) ? "movie" : "series",
+          title: title,
+          poster: poster
+        });
+      }
     }
   }
 
@@ -74,32 +109,42 @@ function extractCards(html) {
 
 export async function home() {
   const res = await kino.fetch(BASE_URL + "/", { headers: HEADERS });
+  if (typeof kino.log === "function") {
+    kino.log("HOME status: " + res.status);
+  }
 
   if (!res.ok) {
     throw kino.error("unavailable", "HTTP " + res.status, {
-      userMessage: "No se pudo conectar con PelisplusHD (error " + res.status + ")."
+      userMessage: "PelisplusHD respondió con error HTTP " + res.status
     });
   }
 
   const html = res.text();
+  if (html.includes("Just a moment") || html.includes("cf-browser-verification")) {
+    throw kino.error("blocked", "Cloudflare activo", {
+      userMessage: "PelisplusHD está bloqueado por protección anti-bots en tu red."
+    });
+  }
+
   const allItems = extractCards(html);
+  if (typeof kino.log === "function") {
+    kino.log("HOME items extraídos: " + allItems.length);
+  }
 
   const movies = allItems.filter(function (i) { return i.kind === "movie"; });
   const series = allItems.filter(function (i) { return i.kind === "series"; });
 
   const rows = [];
-
   if (movies.length > 0) {
     rows.push({
-      id: "peliculas-recientes",
+      id: "peliculas",
       title: "Películas recientes",
       items: movies.slice(0, 24)
     });
   }
-
   if (series.length > 0) {
     rows.push({
-      id: "series-animes",
+      id: "series",
       title: "Series, Animes y Doramas",
       items: series.slice(0, 24)
     });
@@ -110,30 +155,41 @@ export async function home() {
 
 export async function search(input) {
   const query = typeof input === "string" ? input : (input && input.q) || "";
-  const q = encodeURIComponent(query.trim());
-  const res = await kino.fetch(BASE_URL + "/search?s=" + q, { headers: HEADERS });
+  const cleanQ = query.trim();
+  if (!cleanQ) return [];
 
-  if (!res.ok) {
-    throw kino.error("unavailable", "HTTP " + res.status);
+  const urls = [
+    BASE_URL + "/search?s=" + encodeURIComponent(cleanQ),
+    BASE_URL + "/?s=" + encodeURIComponent(cleanQ)
+  ];
+
+  for (let i = 0; i < urls.length; i++) {
+    const res = await kino.fetch(urls[i], { headers: HEADERS });
+    if (typeof kino.log === "function") {
+      kino.log("SEARCH " + urls[i] + " -> HTTP " + res.status);
+    }
+    if (res.ok) {
+      const html = res.text();
+      const found = extractCards(html);
+      if (found.length > 0) {
+        return found;
+      }
+    }
   }
 
-  return extractCards(res.text());
+  return [];
 }
 
 export async function episodes(input) {
   const ref = typeof input === "string" ? input : (input && input.ref) || "";
   const res = await kino.fetch(fixUrl(ref), { headers: HEADERS });
-
-  if (!res.ok) {
-    throw kino.error("not_found", "HTTP " + res.status);
-  }
+  if (!res.ok) return [];
 
   const html = res.text();
   const list = [];
   const seen = new Set();
 
-  // Busca enlaces de capítulos dentro de la ficha de la serie
-  const epRegex = /<a\b[^>]*href=["']([^"']*\/(?:ver|episodio|capitulo|serie)\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  const epRegex = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   let match;
 
   while ((match = epRegex.exec(html)) !== null) {
@@ -142,11 +198,13 @@ export async function episodes(input) {
 
     if (!epUrl || seen.has(epUrl) || epUrl === fixUrl(ref)) continue;
 
-    const numMatch = epText.match(/(\d+)\s*[xX-]\s*(\d+)/) || epText.match(/(\d+)/);
-    if (numMatch) {
+    const urlMatch = epUrl.match(/temporada-(\d+)\/(?:episodio|capitulo)-(\d+)/i);
+    const textMatch = epText.match(/(\d+)\s*[xXeE-]\s*(\d+)/);
+
+    if (urlMatch || textMatch) {
       seen.add(epUrl);
-      const season = numMatch[2] ? parseInt(numMatch[1], 10) : 1;
-      const number = numMatch[2] ? parseInt(numMatch[2], 10) : parseInt(numMatch[1], 10);
+      const season = urlMatch ? parseInt(urlMatch[1], 10) : parseInt(textMatch[1], 10);
+      const number = urlMatch ? parseInt(urlMatch[2], 10) : parseInt(textMatch[2], 10);
 
       list.push({
         ref: epUrl,
@@ -172,7 +230,6 @@ export async function resolve(input) {
   const servers = [];
   const seen = new Set();
 
-  // Busca botones con data-url, data-video o data-src
   const dataAttrRegex = /data-(?:url|video|src)=["']([^"']+)["'][^>]*>([^<]*)</gi;
   let match;
 
@@ -185,7 +242,6 @@ export async function resolve(input) {
     }
   }
 
-  // Respaldo: busca iframes incrustados directamente en el HTML
   if (servers.length === 0) {
     const iframeRegex = /<iframe\b[^>]*src=["']([^"']+)["']/gi;
     while ((match = iframeRegex.exec(html)) !== null) {
@@ -199,7 +255,7 @@ export async function resolve(input) {
 
   if (servers.length === 0) {
     throw kino.error("not_found", "Sin servidores", {
-      userMessage: "No se encontraron enlaces de reproducción para este título."
+      userMessage: "No se encontraron servidores de video en esta ficha."
     });
   }
 
@@ -228,4 +284,4 @@ export async function resolve(input) {
     headers: HEADERS,
     alternatives: servers.slice(1, 8)
   };
-          }
+    }
