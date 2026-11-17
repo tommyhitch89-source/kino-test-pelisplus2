@@ -1,7 +1,7 @@
 {
   "id": "pelisplushd",
   "name": "PelisplusHD",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "apiVersion": 6,
   "description": "Catálogo de películas, series, animes y doramas de PelisplusHD.",
   "entry": "plugin.js",
