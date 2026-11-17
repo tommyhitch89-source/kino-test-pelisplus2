@@ -2,9 +2,9 @@
 {
   "id": "pelisplushd",
   "name": "PelisplusHD",
-  "version": "1.1.4",
+  "version": "1.0.114",
   "apiVersion": 6,
-  "description": "Catálogo completo de películas, series, animes y doramas de PelisplusHD.",
+  "description": "Catálogo de películas, series, anime y doramas de PelisplusHD.",
   "entry": "plugin.js",
   "hosts": [
     "pelisplushd.bz",
@@ -20,6 +20,7 @@
   "capabilities": [
     "home",
     "search",
+    "browse",
     "episodes",
     "resolve"
   ]
