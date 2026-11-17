@@ -1,0 +1,25 @@
+{
+  "id": "pelisplushd",
+  "name": "PelisplusHD",
+  "version": "1.0.1",
+  "apiVersion": 6,
+  "description": "Catálogo de películas, series, animes y doramas de PelisplusHD en español.",
+  "entry": "plugin.js",
+  "hosts": [
+    "pelisplushd.bz",
+    "image.tmdb.org",
+    "streamwish.to",
+    "filemoon.sx",
+    "vidhide.com",
+    "ok.ru",
+    "voe.sx"
+  ],
+  "streamHosts": "any",
+  "browser": true,
+  "capabilities": [
+    "home",
+    "search",
+    "episodes",
+    "resolve"
+  ]
+}
