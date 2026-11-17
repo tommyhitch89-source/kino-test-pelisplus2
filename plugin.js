@@ -1,5 +1,5 @@
 
-const PLUGIN_VERSION = "1.0.114";
+const PLUGIN_VERSION = "1.0.115";
 const BASE_URL = "https://pelisplushd.bz";
 
 const HEADERS = {
