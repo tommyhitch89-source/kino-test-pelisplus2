@@ -31,13 +31,12 @@ function extractCards(html) {
   const seen = new Set();
   if (!html) return items;
 
-  // Estrategia 1: Enlaces que envuelven la tarjeta e imagen
   const cardRegex = /<a\b[^>]*href=["']([^"'#?]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   let match;
 
   while ((match = cardRegex.exec(html)) !== null) {
-    const rawHref = match[1];
-    const innerHtml = match[2];
+    const rawHref = match;
+    const innerHtml = match;
 
     if (!/\/(?:pelicula|serie|anime|dorama|ver)\//i.test(rawHref)) continue;
     if (/\/temporada-\d+|\/episodio-\d+|\/capitulo-\d+/i.test(rawHref)) continue;
@@ -48,15 +47,15 @@ function extractCards(html) {
     const imgMatch = innerHtml.match(/<img\b[^>]*>/i);
     if (!imgMatch) continue;
 
-    const imgTag = imgMatch[0];
+    const imgTag = imgMatch;
     const dataSrc = imgTag.match(/data-src=["']([^"']+)["']/i);
     const src = imgTag.match(/\bsrc=["']([^"']+)["']/i);
     const alt = imgTag.match(/\balt=["']([^"']+)["']/i);
 
-    const poster = fixUrl((dataSrc && dataSrc[1]) || (src && src[1]) || "");
+    const poster = fixUrl((dataSrc && dataSrc) || (src && src) || "");
     if (!poster || poster.startsWith("data:")) continue;
 
-    let title = cleanTitle((alt && alt[1]) || innerHtml);
+    let title = cleanTitle((alt && alt) || innerHtml);
     if (!title || title.length < 2) continue;
 
     seen.add(fullUrl);
@@ -70,120 +69,72 @@ function extractCards(html) {
     });
   }
 
-  // Estrategia 2 (Respaldo): Si la imagen y el enlace están separados en contenedores hermanos
-  if (items.length === 0) {
-    const blockRegex = /<(?:article|div|li)\b[^>]*class=["'][^"']*(?:item|post|poster|card|col-)[^"']*["'][^>]*>([\s\S]*?)<\/(?:article|div|li)>/gi;
-    while ((match = blockRegex.exec(html)) !== null) {
-      const block = match[1];
-      const hrefMatch = block.match(/<a\b[^>]*href=["']([^"'#?]+)["']/i);
-      const imgMatch = block.match(/<img\b[^>]*>/i);
-      if (!hrefMatch || !imgMatch) continue;
-
-      const fullUrl = fixUrl(hrefMatch[1]);
-      if (!fullUrl || seen.has(fullUrl)) continue;
-      if (!/\/(?:pelicula|serie|anime|dorama)\//i.test(fullUrl)) continue;
-
-      const imgTag = imgMatch[0];
-      const dataSrc = imgTag.match(/data-src=["']([^"']+)["']/i);
-      const src = imgTag.match(/\bsrc=["']([^"']+)["']/i);
-      const alt = imgTag.match(/\balt=["']([^"']+)["']/i);
-
-      const poster = fixUrl((dataSrc && dataSrc[1]) || (src && src[1]) || "");
-      const title = cleanTitle((alt && alt[1]) || block);
-
-      if (poster && !poster.startsWith("data:") && title && title.length >= 2) {
-        seen.add(fullUrl);
-        items.push({
-          id: fullUrl,
-          ref: fullUrl,
-          kind: /\/pelicula\//i.test(fullUrl) ? "movie" : "series",
-          title: title,
-          poster: poster
-        });
-      }
-    }
-  }
-
   return items;
 }
 
 export async function home() {
   const res = await kino.fetch(BASE_URL + "/", { headers: HEADERS });
-  if (typeof kino.log === "function") {
-    kino.log("HOME status: " + res.status);
-  }
-
   if (!res.ok) {
-    throw kino.error("unavailable", "HTTP " + res.status, {
-      userMessage: "PelisplusHD respondió con error HTTP " + res.status
-    });
+    throw kino.error("unavailable", "HTTP " + res.status);
   }
 
-  const html = res.text();
-  if (html.includes("Just a moment") || html.includes("cf-browser-verification")) {
-    throw kino.error("blocked", "Cloudflare activo", {
-      userMessage: "PelisplusHD está bloqueado por protección anti-bots en tu red."
-    });
-  }
-
-  const allItems = extractCards(html);
-  if (typeof kino.log === "function") {
-    kino.log("HOME items extraídos: " + allItems.length);
-  }
-
+  const allItems = extractCards(res.text());
   const movies = allItems.filter(function (i) { return i.kind === "movie"; });
   const series = allItems.filter(function (i) { return i.kind === "series"; });
 
   const rows = [];
   if (movies.length > 0) {
     rows.push({
-      id: "peliculas",
       title: "Películas recientes",
       items: movies.slice(0, 24)
     });
   }
   if (series.length > 0) {
     rows.push({
-      id: "series",
       title: "Series, Animes y Doramas",
       items: series.slice(0, 24)
     });
   }
 
-  return rows;
+  if (typeof kino.log === "function") {
+    kino.log("HOME filas enviadas: " + rows.length + " (" + allItems.length + " items)");
+  }
+
+  return { rows: rows };
 }
 
 export async function search(input) {
-  const query = typeof input === "string" ? input : (input && input.q) || "";
+  const query = typeof input === "string" ? input : (input && (input.q || input.query)) || "";
   const cleanQ = query.trim();
-  if (!cleanQ) return [];
+  if (!cleanQ) return { items: [] };
 
+  const slugQ = cleanQ.toLowerCase().replace(/\s+/g, "-");
   const urls = [
     BASE_URL + "/search?s=" + encodeURIComponent(cleanQ),
-    BASE_URL + "/?s=" + encodeURIComponent(cleanQ)
+    BASE_URL + "/search/" + encodeURIComponent(slugQ),
+    BASE_URL + "/buscar/" + encodeURIComponent(slugQ)
   ];
 
   for (let i = 0; i < urls.length; i++) {
     const res = await kino.fetch(urls[i], { headers: HEADERS });
-    if (typeof kino.log === "function") {
-      kino.log("SEARCH " + urls[i] + " -> HTTP " + res.status);
-    }
     if (res.ok) {
-      const html = res.text();
-      const found = extractCards(html);
+      const found = extractCards(res.text());
+      if (typeof kino.log === "function") {
+        kino.log("SEARCH " + urls[i] + " -> " + found.length + " resultados");
+      }
       if (found.length > 0) {
-        return found;
+        return { items: found };
       }
     }
   }
 
-  return [];
+  return { items: [] };
 }
 
 export async function episodes(input) {
   const ref = typeof input === "string" ? input : (input && input.ref) || "";
   const res = await kino.fetch(fixUrl(ref), { headers: HEADERS });
-  if (!res.ok) return [];
+  if (!res.ok) return { episodes: [] };
 
   const html = res.text();
   const list = [];
@@ -193,8 +144,8 @@ export async function episodes(input) {
   let match;
 
   while ((match = epRegex.exec(html)) !== null) {
-    const epUrl = fixUrl(match[1]);
-    const epText = cleanTitle(match[2]);
+    const epUrl = fixUrl(match);
+    const epText = cleanTitle(match);
 
     if (!epUrl || seen.has(epUrl) || epUrl === fixUrl(ref)) continue;
 
@@ -203,8 +154,8 @@ export async function episodes(input) {
 
     if (urlMatch || textMatch) {
       seen.add(epUrl);
-      const season = urlMatch ? parseInt(urlMatch[1], 10) : parseInt(textMatch[1], 10);
-      const number = urlMatch ? parseInt(urlMatch[2], 10) : parseInt(textMatch[2], 10);
+      const season = urlMatch ? parseInt(urlMatch, 10) : parseInt(textMatch, 10);
+      const number = urlMatch ? parseInt(urlMatch, 10) : parseInt(textMatch, 10);
 
       list.push({
         ref: epUrl,
@@ -215,7 +166,11 @@ export async function episodes(input) {
     }
   }
 
-  return list;
+  if (typeof kino.log === "function") {
+    kino.log("EPISODES extraídos: " + list.length);
+  }
+
+  return { episodes: list };
 }
 
 export async function resolve(input) {
@@ -234,8 +189,8 @@ export async function resolve(input) {
   let match;
 
   while ((match = dataAttrRegex.exec(html)) !== null) {
-    const url = fixUrl(match[1]);
-    const label = cleanTitle(match[2]) || "Servidor " + (servers.length + 1);
+    const url = fixUrl(match);
+    const label = cleanTitle(match) || "Servidor " + (servers.length + 1);
     if (url && url.startsWith("http") && !seen.has(url)) {
       seen.add(url);
       servers.push({ label: label, ref: url });
@@ -245,12 +200,16 @@ export async function resolve(input) {
   if (servers.length === 0) {
     const iframeRegex = /<iframe\b[^>]*src=["']([^"']+)["']/gi;
     while ((match = iframeRegex.exec(html)) !== null) {
-      const url = fixUrl(match[1]);
+      const url = fixUrl(match);
       if (url && url.startsWith("http") && !seen.has(url)) {
         seen.add(url);
         servers.push({ label: "Reproductor " + (servers.length + 1), ref: url });
       }
     }
+  }
+
+  if (typeof kino.log === "function") {
+    kino.log("RESOLVE servidores encontrados: " + servers.length);
   }
 
   if (servers.length === 0) {
@@ -259,7 +218,7 @@ export async function resolve(input) {
     });
   }
 
-  let targetUrl = servers[0].ref;
+  let targetUrl = servers.ref;
 
   if (targetUrl.includes("/ir/") || targetUrl.includes("/goto/")) {
     const redirRes = await kino.fetch(targetUrl, { headers: HEADERS });
@@ -284,4 +243,4 @@ export async function resolve(input) {
     headers: HEADERS,
     alternatives: servers.slice(1, 8)
   };
-    }
+}
