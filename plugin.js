@@ -1,10 +1,11 @@
 
+const PLUGIN_VERSION = "1.0.114";
 const BASE_URL = "https://pelisplushd.bz";
 
 const HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-  "Referer": BASE_URL + "/"
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Referer": BASE_URL + "/",
+  "Accept-Language": "es-ES,es;q=0.9,en;q=0.8"
 };
 
 const CATEGORIES = [
@@ -12,25 +13,29 @@ const CATEGORIES = [
     id: "peliculas",
     title: "Películas",
     path: "/peliculas",
-    genre: "peliculas"
+    genre: "peliculas",
+    kind: "movie"
   },
   {
     id: "series",
     title: "Series",
     path: "/series",
-    genre: "series"
+    genre: "series",
+    kind: "series"
   },
   {
     id: "animes",
     title: "Anime",
     path: "/animes",
-    genre: "anime"
+    genre: "anime",
+    kind: "series"
   },
   {
     id: "doramas",
     title: "Doramas",
     path: "/doramas",
-    genre: "series"
+    genre: "series",
+    kind: "series"
   }
 ];
 
@@ -42,11 +47,15 @@ const EMBED_HOSTS = [
   "voe.sx"
 ];
 
-function absoluteUrl(url) {
-  if (!url) return "";
+// --------------------------------------------------
+// UTILIDADES
+// --------------------------------------------------
+
+function absoluteUrl(value, base) {
+  if (!value) return "";
 
   try {
-    return new URL(url, BASE_URL).href;
+    return new URL(value, base || BASE_URL).href;
   } catch (_) {
     return "";
   }
@@ -60,24 +69,26 @@ function decodeHtml(value) {
     .replace(/&nbsp;/gi, " ")
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
-    .replace(/&#(\d+);/g, (_, n) =>
-      String.fromCharCode(Number(n))
-    );
+    .replace(/&#(\d+);/g, function (_, n) {
+      return String.fromCharCode(Number(n));
+    })
+    .replace(/&#x([0-9a-f]+);/gi, function (_, n) {
+      return String.fromCharCode(parseInt(n, 16));
+    });
 }
 
 function cleanText(value) {
-  return decodeHtml(
-    String(value || "")
-      .replace(/<script[\s\S]*?<\/script>/gi, " ")
-      .replace(/<style[\s\S]*?<\/style>/gi, " ")
-      .replace(/<[^>]+>/g, " ")
-  )
+  return decodeHtml(String(value || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]*>/g, " "))
     .replace(/\s+/g, " ")
     .trim();
 }
 
 function getAttribute(html, name) {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
   const regex = new RegExp(
     escaped + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))",
     "i"
@@ -93,14 +104,14 @@ function getAttribute(html, name) {
 function slugFromUrl(url) {
   try {
     const parsed = new URL(url);
-    return parsed.pathname
-      .replace(/\/+/g, "/")
-      .replace(/\/$/, "")
-      .split("/")
-      .filter(Boolean)
-      .join("-")
-      .replace(/[^a-zA-Z0-9_-]/g, "")
-      .slice(-100);
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    const slug = parts[parts.length - 1] || "titulo";
+
+    return slug
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, "-")
+      .replace(/-+/g, "-")
+      .slice(0, 110) || "titulo";
   } catch (_) {
     return "titulo";
   }
@@ -109,15 +120,15 @@ function slugFromUrl(url) {
 function getKind(url, fallback) {
   const path = String(url || "").toLowerCase();
 
-  if (/\/pelicula(s)?\//.test(path)) return "movie";
-  if (/\/serie(s)?\//.test(path)) return "series";
-  if (/\/anime(s)?\//.test(path)) return "series";
-  if (/\/dorama(s)?\//.test(path)) return "series";
+  if (/\/pelicula\//.test(path)) return "movie";
+  if (/\/serie\//.test(path)) return "series";
+  if (/\/anime\//.test(path)) return "series";
+  if (/\/dorama\//.test(path)) return "series";
 
   return fallback || "movie";
 }
 
-function getPoster(anchor) {
+function getPoster(anchor, base) {
   const image = anchor.match(/<img\b[^>]*>/i);
 
   if (!image) return "";
@@ -132,11 +143,8 @@ function getPoster(anchor) {
   ];
 
   for (const candidate of candidates) {
-    if (
-      candidate &&
-      !candidate.startsWith("data:image")
-    ) {
-      return absoluteUrl(candidate);
+    if (candidate && !candidate.startsWith("data:image")) {
+      return absoluteUrl(candidate, base);
     }
   }
 
@@ -156,29 +164,72 @@ function getTitle(anchor, url) {
 
   for (const candidate of candidates) {
     const title = cleanText(candidate);
-    if (title.length > 1) return title;
+    if (title.length > 1) return title.slice(0, 200);
   }
 
   const text = cleanText(anchor);
 
-  if (text.length > 1) return text.slice(0, 180);
+  if (text.length > 1) return text.slice(0, 200);
 
-  const slug = slugFromUrl(url)
-    .replace(/-/g, " ")
-    .trim();
-
-  return slug || "Título sin nombre";
+  return slugFromUrl(url).replace(/[-_]/g, " ");
 }
 
 function getYear(text) {
-  const match = String(text || "").match(
-    /\b(19\d{2}|20\d{2})\b/
-  );
-
+  const match = String(text || "").match(/\b(19\d{2}|20\d{2})\b/);
   return match ? match[1] : undefined;
 }
 
-function extractCards(html, fallbackKind) {
+function isEpisodeUrl(url) {
+  return /episodio|episode|temporada|season/i.test(url);
+}
+
+function isCatalogItemUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const parts = parsed.pathname.split("/").filter(Boolean);
+
+    if (parts.length < 2) return false;
+    if (isEpisodeUrl(url)) return false;
+
+    return /pelicula|serie|anime|dorama/i.test(parsed.pathname);
+  } catch (_) {
+    return false;
+  }
+}
+
+// --------------------------------------------------
+// PETICIONES HTTP
+// --------------------------------------------------
+
+async function getHtml(url) {
+  const response = await kino.fetch(url, {
+    headers: HEADERS,
+    timeoutMs: 18000
+  });
+
+  if (response.status === 404) {
+    throw kino.error("not_found", "Página no encontrada");
+  }
+
+  if (response.status === 429) {
+    throw kino.error("rate_limited", "El sitio está limitando las peticiones");
+  }
+
+  if (!response.ok) {
+    throw kino.error(
+      "unavailable",
+      "PelisplusHD respondió con código " + response.status
+    );
+  }
+
+  return response.text();
+}
+
+// --------------------------------------------------
+// EXTRACCIÓN DE PELÍCULAS Y SERIES
+// --------------------------------------------------
+
+function extractCards(html, fallbackKind, base) {
   const results = [];
   const seen = new Set();
 
@@ -188,42 +239,31 @@ function extractCards(html, fallbackKind) {
 
   for (const anchor of anchors) {
     const href = getAttribute(anchor, "href");
-
     if (!href) continue;
 
-    const url = absoluteUrl(href);
-    if (!url) continue;
-
-    if (!/pelicula|serie|anime|dorama/i.test(url)) {
-      continue;
-    }
-
-    if (
-      /episodio|temporada|categoria|genero|page=/i.test(url)
-    ) {
-      continue;
-    }
+    const url = absoluteUrl(href, base);
+    if (!url || !isCatalogItemUrl(url)) continue;
 
     if (seen.has(url)) continue;
 
     const title = getTitle(anchor, url);
-    const poster = getPoster(anchor);
-
-    if (!title || title === "Título sin nombre") continue;
+    if (!title || title.length < 2) continue;
 
     const kind = getKind(url, fallbackKind);
-    const text = cleanText(anchor);
+    const poster = getPoster(anchor, base);
+    const year = getYear(cleanText(anchor));
 
     const item = {
       id: slugFromUrl(url),
       ref: url,
-      title,
-      kind,
-      poster: poster || undefined,
-      year: getYear(text),
+      title: title,
+      kind: kind,
       overview: "Sin descripción disponible",
       genres: ["Sin clasificar"]
     };
+
+    if (poster) item.poster = poster;
+    if (year) item.year = year;
 
     results.push(item);
     seen.add(url);
@@ -232,31 +272,11 @@ function extractCards(html, fallbackKind) {
   return results;
 }
 
-async function getHtml(url) {
-  const response = await kino.fetch(url, {
-    headers: HEADERS,
-    timeoutMs: 20000
-  });
+// --------------------------------------------------
+// PAGINACIÓN
+// --------------------------------------------------
 
-  if (response.status === 404) {
-    throw kino.error("not_found", "Página no encontrada");
-  }
-
-  if (response.status === 429) {
-    throw kino.error("rate_limited", "Demasiadas peticiones");
-  }
-
-  if (!response.ok) {
-    throw kino.error(
-      "unavailable",
-      "El sitio respondió con el código " + response.status
-    );
-  }
-
-  return response.text();
-}
-
-function pageNumber(url) {
+function getPageNumber(url) {
   try {
     return Number(new URL(url).searchParams.get("page")) || 1;
   } catch (_) {
@@ -264,76 +284,78 @@ function pageNumber(url) {
   }
 }
 
-function nextPageUrl(html, currentUrl) {
-  const current = pageNumber(currentUrl);
-  const links = String(html || "").match(
+function findNextPage(html, currentUrl) {
+  const anchors = String(html || "").match(
     /<a\b[^>]*>[\s\S]*?<\/a>/gi
   ) || [];
 
+  const currentPage = getPageNumber(currentUrl);
   const candidates = [];
 
-  for (const link of links) {
-    const href = getAttribute(link, "href");
+  for (const anchor of anchors) {
+    const href = getAttribute(anchor, "href");
     if (!href) continue;
 
-    const url = absoluteUrl(href);
+    const url = absoluteUrl(href, currentUrl);
     if (!url) continue;
 
-    let page = 0;
+    const rel = getAttribute(anchor, "rel").toLowerCase();
+    const text = cleanText(anchor).toLowerCase();
+
+    if (rel === "next" || /^(siguiente|next|›|»|→)$/.test(text)) {
+      return url;
+    }
 
     try {
       const parsed = new URL(url);
-      page = Number(parsed.searchParams.get("page")) || 0;
+      const page = Number(parsed.searchParams.get("page")) || 0;
+
+      if (page > currentPage) {
+        candidates.push({
+          page: page,
+          url: url
+        });
+      }
     } catch (_) {
-      continue;
-    }
-
-    if (page > current) {
-      candidates.push({ page, url });
+      // Enlace inválido: se ignora.
     }
   }
 
-  candidates.sort((a, b) => a.page - b.page);
+  candidates.sort(function (a, b) {
+    return a.page - b.page;
+  });
 
-  if (candidates.length) {
-    return candidates[0].url;
-  }
+  return candidates.length ? candidates[0].url : undefined;
+}
 
-  // PelisplusHD utiliza paginación mediante ?page=N.
-  // Solo se genera el siguiente enlace si la página muestra
-  // que existe una paginación posterior.
-  const paginationExists =
-    /pagination|paginacion|page-numbers|class=["'][^"']*pages/i.test(
-      html
-    );
+function categoryFromRef(ref) {
+  if (!ref) return null;
 
-  if (paginationExists) {
-    const next = new URL(currentUrl);
-    next.searchParams.set("page", String(current + 1));
-    return next.href;
-  }
+  const id = String(ref).replace(/^cat:/, "");
 
-  return undefined;
+  return CATEGORIES.find(function (category) {
+    return category.id === id;
+  }) || null;
 }
 
 async function loadCategory(category, cursor) {
   const url = cursor || absoluteUrl(category.path);
   const html = await getHtml(url);
 
+  const items = extractCards(
+    html,
+    category.kind,
+    url
+  );
+
   return {
-    items: extractCards(html, category.id === "peliculas" ? "movie" : "series"),
-    next: nextPageUrl(html, url)
+    items: items.slice(0, 100),
+    next: findNextPage(html, url)
   };
 }
 
-function findCategory(ref) {
-  return CATEGORIES.find(
-    category => ref === "cat:" + category.id
-  );
-}
-
 // --------------------------------------------------
-// INICIO: filas principales del catálogo
+// INICIO
 // --------------------------------------------------
 
 export async function home() {
@@ -341,39 +363,48 @@ export async function home() {
 
   const rows = [];
 
-  for (const category of CATEGORIES) {
-    try {
-      const page = await loadCategory(category, null);
+  const pages = await Promise.all(
+    CATEGORIES.map(async function (category) {
+      try {
+        return {
+          category: category,
+          page: await loadCategory(category, null)
+        };
+      } catch (error) {
+        kino.log(
+          "Categoría no disponible:",
+          category.id,
+          error.code || "error"
+        );
 
-      if (page.items.length) {
-        rows.push({
-          id: category.id,
-          title: category.title,
-          ref: "cat:" + category.id,
-          genre: category.genre,
-          items: page.items
-        });
+        return null;
       }
-    } catch (error) {
-      kino.log(
-        "No se pudo cargar la categoría:",
-        category.id,
-        error.code || "error"
-      );
-    }
+    })
+  );
+
+  for (const result of pages) {
+    if (!result || !result.page.items.length) continue;
+
+    rows.push({
+      id: result.category.id,
+      title: result.category.title,
+      ref: "cat:" + result.category.id,
+      genre: result.category.genre,
+      items: result.page.items.slice(0, 60)
+    });
   }
 
   return rows;
 }
 
 // --------------------------------------------------
-// CATÁLOGO: paginación de todas las categorías
+// EXPLORAR CATÁLOGO COMPLETO
 // --------------------------------------------------
 
 export async function browse(ref, cursor) {
   await null;
 
-  const category = findCategory(ref);
+  const category = categoryFromRef(ref);
 
   if (!category) {
     throw kino.error("not_found", "Categoría no encontrada");
@@ -386,46 +417,69 @@ export async function browse(ref, cursor) {
 // BÚSQUEDA
 // --------------------------------------------------
 
+async function searchPage(url) {
+  const html = await getHtml(url);
+
+  return {
+    items: extractCards(html, "movie", url).slice(0, 100),
+    next: findNextPage(html, url)
+  };
+}
+
 export async function search(query) {
   await null;
 
-  const term = String(query && query.q || "").trim();
+  const q = String(query && query.q || "").trim();
 
-  if (!term) return [];
+  if (!q) return [];
 
-  const urls = [
-    absoluteUrl("/search?s=" + encodeURIComponent(term)),
-    absoluteUrl("/search/" + encodeURIComponent(term))
-  ];
+  if (query && query.cursor) {
+    return searchPage(query.cursor);
+  }
 
-  let lastError = null;
+  const terms = [q];
 
-  for (const url of urls) {
-    try {
-      const html = await getHtml(url);
-      const items = extractCards(html);
+  if (query && query.originalTitle && query.originalTitle !== q) {
+    terms.push(query.originalTitle);
+  }
 
-      if (items.length) {
-        const current = url;
-        return {
-          items,
-          next: nextPageUrl(html, current)
-        };
+  if (query && Array.isArray(query.altTitles)) {
+    for (const title of query.altTitles.slice(0, 2)) {
+      if (title && !terms.includes(title)) {
+        terms.push(title);
       }
-    } catch (error) {
-      lastError = error;
     }
   }
 
-  if (lastError && lastError.code === "rate_limited") {
-    throw lastError;
+  for (const term of terms) {
+    const urls = [
+      absoluteUrl("/search?s=" + encodeURIComponent(term)),
+      absoluteUrl("/search/" + encodeURIComponent(term))
+    ];
+
+    for (const url of urls) {
+      try {
+        const result = await searchPage(url);
+
+        if (result.items.length) return result;
+      } catch (error) {
+        if (
+          error.code === "rate_limited" ||
+          error.code === "blocked"
+        ) {
+          return [];
+        }
+
+        kino.log("Búsqueda alternativa:", error.code || "error");
+      }
+    }
   }
 
   return [];
 }
 
 // --------------------------------------------------
-// INFORMACIÓN DE UNA SERIE
+// DATOS DE LA PÁGINA DE UNA SERIE
 // --------------------------------------------------
 
 function getPageTitle(html, fallback) {
@@ -434,18 +488,24 @@ function getPageTitle(html, fallback) {
   );
 
   return match
-    ? cleanText(match[1])
+    ? cleanText(match[1]).slice(0, 200)
     : fallback || "Serie sin título";
 }
 
-function getPagePoster(html) {
-  const meta = String(html || "").match(
-    /<meta\b[^>]*(?:property|name)=["'](?:og:image|twitter:image)["'][^>]*>/i
-  );
+function getPagePoster(html, base) {
+  const tags = String(html || "").match(
+    /<meta\b[^>]*>/gi
+  ) || [];
 
-  if (meta) {
-    const content = getAttribute(meta[0], "content");
-    if (content) return absoluteUrl(content);
+  for (const tag of tags) {
+    const property =
+      getAttribute(tag, "property") ||
+      getAttribute(tag, "name");
+
+    if (/og:image|twitter:image/i.test(property)) {
+      const content = getAttribute(tag, "content");
+      if (content) return absoluteUrl(content, base);
+    }
   }
 
   const images = String(html || "").match(
@@ -458,7 +518,7 @@ function getPagePoster(html) {
       getAttribute(image, "src");
 
     if (src && !src.startsWith("data:image")) {
-      return absoluteUrl(src);
+      return absoluteUrl(src, base);
     }
   }
 
@@ -468,6 +528,55 @@ function getPagePoster(html) {
 // --------------------------------------------------
 // TEMPORADAS Y EPISODIOS
 // --------------------------------------------------
+
+function getEpisodeNumbers(url, title, fallbackNumber) {
+  const source = url + " " + title;
+
+  let season = 1;
+  let number = 0;
+
+  const combined = source.match(/(\d+)\s*x\s*(\d+)/i);
+
+  if (combined) {
+    season = Number(combined[1]);
+    number = Number(combined[2]);
+  }
+
+  if (!number) {
+    const seasonMatch = source.match(
+      /temporada[-_/\s]*(\d+)/i
+    );
+
+    const episodeMatch = source.match(
+      /episodio[-_/\s]*(\d+)/i
+    );
+
+    const sMatch = source.match(/s(\d{1,2})e(\d{1,3})/i);
+
+    if (seasonMatch) season = Number(seasonMatch[1]);
+    if (episodeMatch) number = Number(episodeMatch[1]);
+
+    if (sMatch) {
+      season = Number(sMatch[1]);
+      number = Number(sMatch[2]);
+    }
+  }
+
+  if (!number) {
+    const textMatch = String(title || "").match(
+      /(?:episodio|episode|cap[ií]tulo)\s*(\d+)/i
+    );
+
+    if (textMatch) number = Number(textMatch[1]);
+  }
+
+  if (!number) number = fallbackNumber;
+
+  return {
+    season: season >= 1 && season <= 999 ? season : 1,
+    number: number
+  };
+}
 
 export async function episodes(ref) {
   await null;
@@ -480,7 +589,7 @@ export async function episodes(ref) {
 
   const html = await getHtml(url);
 
-  const anchors = html.match(
+  const anchors = String(html || "").match(
     /<a\b[^>]*>[\s\S]*?<\/a>/gi
   ) || [];
 
@@ -491,73 +600,60 @@ export async function episodes(ref) {
     const href = getAttribute(anchor, "href");
     if (!href) continue;
 
-    const episodeUrl = absoluteUrl(href);
+    const episodeUrl = absoluteUrl(href, url);
+
+    if (!episodeUrl || !isEpisodeUrl(episodeUrl)) continue;
+    if (seen.has(episodeUrl)) continue;
+
+    const title = getTitle(anchor, episodeUrl);
+
+    const numbers = getEpisodeNumbers(
+      episodeUrl,
+      title,
+      found.length + 1
+    );
 
     if (
-      !/episodio|episode|temporada/i.test(episodeUrl)
+      numbers.number < 1 ||
+      numbers.number > 99999
     ) {
       continue;
     }
 
-    if (seen.has(episodeUrl)) continue;
+    const episode = {
+      season: numbers.season,
+      number: numbers.number,
+      title: title.slice(0, 200),
+      ref: episodeUrl
+    };
 
-    const title =
-      getTitle(anchor, episodeUrl) ||
-      "Episodio sin título";
+    const poster = getPoster(anchor, url);
+    if (poster) episode.still = poster;
 
-    const seasonMatch = episodeUrl.match(
-      /temporada[-/ ]?(\d+)/i
-    );
-
-    const episodeMatch = episodeUrl.match(
-      /episodio[-/ ]?(\d+)/i
-    );
-
-    const combinedMatch = episodeUrl.match(
-      /(\d+)x(\d+)/i
-    );
-
-    let season = seasonMatch
-      ? Number(seasonMatch[1])
-      : 1;
-
-    let number = episodeMatch
-      ? Number(episodeMatch[1])
-      : found.length + 1;
-
-    if (combinedMatch) {
-      season = Number(combinedMatch[1]);
-      number = Number(combinedMatch[2]);
-    }
-
-    found.push({
-      season,
-      number,
-      title,
-      ref: episodeUrl,
-      still: getPoster(anchor) || undefined,
-      overview: "Sin descripción disponible"
-    });
-
+    found.push(episode);
     seen.add(episodeUrl);
   }
 
-  found.sort((a, b) =>
-    a.season - b.season || a.number - b.number
-  );
+  found.sort(function (a, b) {
+    return a.season - b.season || a.number - b.number;
+  });
+
+  const seriesInfo = {
+    title: getPageTitle(html, "Serie"),
+    overview: "Sin descripción disponible"
+  };
+
+  const poster = getPagePoster(html, url);
+  if (poster) seriesInfo.poster = poster;
 
   return {
-    series: {
-      title: getPageTitle(html, "Serie"),
-      poster: getPagePoster(html) || undefined,
-      overview: "Sin descripción disponible"
-    },
+    series: seriesInfo,
     episodes: found
   };
 }
 
 // --------------------------------------------------
-// REPRODUCCIÓN
+// EXTRACCIÓN DE SERVIDORES DE REPRODUCCIÓN
 // --------------------------------------------------
 
 function isDirectVideo(url) {
@@ -568,114 +664,180 @@ function isAllowedEmbed(url) {
   try {
     const host = new URL(url).hostname.toLowerCase();
 
-    return EMBED_HOSTS.some(
-      allowed => host === allowed ||
-        host.endsWith("." + allowed)
-    );
+    return EMBED_HOSTS.some(function (allowed) {
+      return host === allowed || host.endsWith("." + allowed);
+    });
   } catch (_) {
     return false;
   }
 }
 
-function extractVideoLinks(html, pageUrl) {
-  const links = [];
-  const seen = new Set();
+function extractVideoSources(html, base) {
+  const direct = [];
+  const embeds = [];
+
+  const seenDirect = new Set();
+  const seenEmbeds = new Set();
 
   const patterns = [
-    /<video\b[^>]*src=["']([^"']+)["']/gi,
-    /<source\b[^>]*src=["']([^"']+)["']/gi,
-    /<iframe\b[^>]*src=["']([^"']+)["']/gi
+    /<video\b[^>]*>/gi,
+    /<source\b[^>]*>/gi,
+    /<iframe\b[^>]*>/gi
   ];
 
   for (const pattern of patterns) {
     let match;
 
     while ((match = pattern.exec(html)) !== null) {
-      const url = absoluteUrl(match[1]);
+      const tag = match[0];
 
-      if (!url || seen.has(url)) continue;
+      const raw =
+        getAttribute(tag, "src") ||
+        getAttribute(tag, "data-src") ||
+        getAttribute(tag, "data-lazy-src");
 
-      if (
-        isDirectVideo(url) ||
-        isAllowedEmbed(url)
+      if (!raw) continue;
+
+      const url = absoluteUrl(raw, base);
+      if (!url) continue;
+
+      if (isDirectVideo(url) && !seenDirect.has(url)) {
+        direct.push(url);
+        seenDirect.add(url);
+      } else if (
+        isAllowedEmbed(url) &&
+        !seenEmbeds.has(url)
       ) {
-        links.push(url);
-        seen.add(url);
+        embeds.push(url);
+        seenEmbeds.add(url);
       }
     }
   }
 
-  // Algunos reproductores guardan el enlace en data-src.
-  const dataSrcPattern =
-    /data-src=["']([^"']+)["']/gi;
+  // Busca también fuentes directas declaradas en scripts.
+  const scriptPattern =
+    /https?:\\?\/\\?\/[^"'\\\s<>]+?\.(?:m3u8|mp4|mpd)(?:\?[^"'\\\s<>]*)?/gi;
 
-  let dataMatch;
+  let scriptMatch;
 
-  while ((dataMatch = dataSrcPattern.exec(html)) !== null) {
-    const url = absoluteUrl(dataMatch[1]);
+  while ((scriptMatch = scriptPattern.exec(html)) !== null) {
+    const raw = scriptMatch[0]
+      .replace(/\\\//g, "/")
+      .replace(/&amp;/g, "&");
 
-    if (
-      url &&
-      !seen.has(url) &&
-      (isDirectVideo(url) || isAllowedEmbed(url))
-    ) {
-      links.push(url);
-      seen.add(url);
+    const url = absoluteUrl(raw, base);
+
+    if (url && !seenDirect.has(url)) {
+      direct.push(url);
+      seenDirect.add(url);
     }
   }
 
-  return links;
-}
+  // Algunos sitios guardan servidores en data-src.
+  const dataPattern = /data-src=["']([^"']+)["']/gi;
+  let dataMatch;
 
-async function captureEmbed(url) {
-  if (!isAllowedEmbed(url)) {
-    throw kino.error(
-      "unavailable",
-      "El servidor no está incluido en los hosts permitidos"
-    );
+  while ((dataMatch = dataPattern.exec(html)) !== null) {
+    const url = absoluteUrl(dataMatch[1], base);
+
+    if (
+      url &&
+      isAllowedEmbed(url) &&
+      !seenEmbeds.has(url)
+    ) {
+      embeds.push(url);
+      seenEmbeds.add(url);
+    }
   }
 
+  return {
+    direct: direct,
+    embeds: embeds
+  };
+}
+
+// --------------------------------------------------
+// CAPTURA DEL REPRODUCTOR DE KINO
+// --------------------------------------------------
+
+async function capturePlayer(embedUrl, referer) {
   if (
     !kino.browser ||
     typeof kino.browser.capture !== "function"
   ) {
     throw kino.error(
       "unavailable",
-      "El navegador de captura no está disponible"
+      "La captura del navegador de Kino no está disponible"
     );
   }
 
-  const result = await kino.browser.capture(url, {
-    timeoutMs: 18000
+  if (!isAllowedEmbed(embedUrl)) {
+    throw kino.error(
+      "unavailable",
+      "Servidor no permitido para captura"
+    );
+  }
+
+  const result = await kino.browser.capture(embedUrl, {
+    timeoutMs: 18000,
+    headers: {
+      "Referer": referer || BASE_URL + "/"
+    }
   });
 
   const media = result.media || [];
 
-  if (!media.length) {
+  if (!media.length || !media[0].url) {
     throw kino.error(
       "unavailable",
-      "El reproductor no proporcionó un enlace de vídeo"
+      "El servidor no proporcionó un vídeo compatible"
     );
   }
 
   const first = media[0];
 
-  if (!first || !first.url) {
-    throw kino.error(
-      "unavailable",
-      "No se encontró una fuente reproducible"
-    );
+  const stream = {
+    url: first.url,
+    headers: first.headers || {}
+  };
+
+  if (first.mime) stream.mime = first.mime;
+
+  const alternatives = media.slice(1, 8)
+    .filter(function (item) {
+      return item && item.url;
+    })
+    .map(function (item) {
+      const alternative = {
+        url: item.url,
+        headers: item.headers || {}
+      };
+
+      if (item.mime) alternative.mime = item.mime;
+
+      return alternative;
+    });
+
+  if (alternatives.length) {
+    stream.alternatives = alternatives;
   }
 
-  return {
-    url: first.url,
-    headers: first.headers || HEADERS,
-    alternatives: media.slice(1).map(item => ({
-      url: item.url,
-      headers: item.headers || HEADERS
-    }))
-  };
+  if (result.subtitles && result.subtitles.length) {
+    stream.subtitles = result.subtitles.map(function (sub) {
+      return {
+        lang: "es",
+        url: sub.url,
+        format: /\.srt(\?|$)/i.test(sub.url) ? "srt" : "vtt"
+      };
+    });
+  }
+
+  return stream;
 }
+
+// --------------------------------------------------
+// RESOLUCIÓN FINAL DE VÍDEO
+// --------------------------------------------------
 
 export async function resolve(ref) {
   await null;
@@ -687,52 +849,72 @@ export async function resolve(ref) {
   }
 
   const html = await getHtml(url);
-  const links = extractVideoLinks(html, url);
 
-  if (!links.length) {
-    throw kino.error(
-      "unavailable",
-      "No se encontró un reproductor compatible en esta página"
-    );
-  }
+  const sources = extractVideoSources(html, url);
 
-  // Primero se prueban las fuentes directas.
-  const direct = links.find(isDirectVideo);
+  // Primera opción: fuente directa.
+  if (sources.direct.length) {
+    const first = sources.direct[0];
 
-  if (direct) {
-    return {
-      url: direct,
+    const stream = {
+      url: first,
       headers: {
-        ...HEADERS,
         "Referer": url
       }
     };
+
+    const alternatives = sources.direct
+      .slice(1, 8)
+      .map(function (videoUrl) {
+        return {
+          url: videoUrl,
+          headers: {
+            "Referer": url
+          }
+        };
+      });
+
+    if (alternatives.length) {
+      stream.alternatives = alternatives;
+    }
+
+    return stream;
   }
 
-  // Si no hay una fuente directa, se intenta capturar
-  // el reproductor público durante la acción de Play.
-  let lastError = null;
+  // Segunda opción: reproductores externos compatibles.
+  if (sources.embeds.length) {
+    let lastError = null;
 
-  for (const embed of links) {
-    try {
-      return await captureEmbed(embed);
-    } catch (error) {
-      lastError = error;
+    for (const embed of sources.embeds.slice(0, 3)) {
+      try {
+        return await capturePlayer(embed, url);
+      } catch (error) {
+        lastError = error;
 
-      // No se intenta superar verificaciones humanas.
-      if (
-        error.code === "blocked" ||
-        error.code === "not_allowed"
-      ) {
-        throw error;
+        // No se intenta resolver verificaciones humanas.
+        if (
+          error.code === "blocked" ||
+          error.code === "not_allowed"
+        ) {
+          continue;
+        }
+
+        if (error.code === "busy") {
+          throw error;
+        }
       }
+    }
+
+    if (lastError) {
+      throw kino.error(
+        "unavailable",
+        "No se pudo abrir ninguno de los reproductores disponibles"
+      );
     }
   }
 
   throw kino.error(
     "unavailable",
-    lastError
-      ? "No fue posible obtener una fuente compatible"
-      : "No se encontró un servidor disponible"
+    "No se encontró una fuente de vídeo compatible"
   );
 }
