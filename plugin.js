@@ -27,10 +27,18 @@ function cleanTitle(raw) {
 }
 
 function getGroup(matchObj, index) {
-  if (!matchObj || typeof matchObj.at !== "function") {
-    return matchObj ? matchObj.slice(index, index + 1).pop() : "";
+  if (!matchObj) return "";
+  if (typeof matchObj.at === "function") {
+    return matchObj.at(index) || "";
   }
-  return matchObj.at(index) || "";
+  return matchObj.slice(index, index + 1).pop() || "";
+}
+
+function makeSlugId(fullUrl) {
+  return fullUrl
+    .replace(/^https?:\/\/[^/]+/, "")
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .replace(/^_+|_+$/g, "") || fullUrl;
 }
 
 function extractCards(html) {
@@ -66,19 +74,24 @@ function extractCards(html) {
     const title = cleanTitle(rawLabel);
     if (!title || title.length < 2) continue;
 
-    const yearMatch = rawLabel.match(/\((\d{4})\)/);
-    const year = yearMatch ? getGroup(yearMatch, 1) : undefined;
-
     seen.add(fullUrl);
     const isMovie = /\/pelicula\//i.test(fullUrl);
-    items.push({
-      id: fullUrl,
+
+    const card = {
+      id: makeSlugId(fullUrl),
       ref: fullUrl,
       kind: isMovie ? "movie" : "series",
       title: title,
-      year: year,
       poster: poster
-    });
+    };
+
+    const yearMatch = rawLabel.match(/\((\d{4})\)/);
+    const yearStr = yearMatch ? getGroup(yearMatch, 1) : "";
+    if (yearStr && yearStr.length === 4) {
+      card.year = yearStr;
+    }
+
+    items.push(card);
   }
 
   return items;
@@ -99,23 +112,21 @@ export async function home() {
   const rows = [];
   if (movies.length > 0) {
     rows.push({
-      id: "peliculas",
+      id: "pelisplushd-peliculas",
       title: "Películas recientes",
-      genre: "peliculas",
       items: movies.slice(0, 30)
     });
   }
   if (series.length > 0) {
     rows.push({
-      id: "series",
+      id: "pelisplushd-series",
       title: "Series, Animes y Doramas",
-      genre: "series",
       items: series.slice(0, 30)
     });
   }
 
   if (typeof kino.log === "function") {
-    kino.log("HOME v1.1.0 -> " + rows.length + " filas (" + allItems.length + " items)");
+    kino.log("HOME v1.1.1 -> " + rows.length + " filas (" + allItems.length + " items)");
   }
 
   return rows;
@@ -165,7 +176,7 @@ export async function search(query) {
   }
 
   if (typeof kino.log === "function") {
-    kino.log("SEARCH v1.1.0 '" + cleanQ + "' -> " + results.length + " items");
+    kino.log("SEARCH v1.1.1 '" + cleanQ + "' -> " + results.length + " items");
   }
 
   return results.slice(0, 50);
@@ -209,7 +220,7 @@ export async function episodes(input) {
   }
 
   if (typeof kino.log === "function") {
-    kino.log("EPISODES v1.1.0 -> " + list.length);
+    kino.log("EPISODES v1.1.1 -> " + list.length);
   }
 
   return list;
@@ -251,7 +262,7 @@ export async function resolve(input) {
   }
 
   if (typeof kino.log === "function") {
-    kino.log("RESOLVE v1.1.0 servidores: " + servers.length);
+    kino.log("RESOLVE v1.1.1 servidores: " + servers.length);
   }
 
   const firstServer = servers.at(0);
