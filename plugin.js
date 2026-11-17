@@ -9,34 +9,10 @@ const HEADERS = {
 };
 
 const CATEGORIES = [
-  {
-    id: "peliculas",
-    title: "Películas",
-    path: "/peliculas",
-    genre: "peliculas",
-    kind: "movie"
-  },
-  {
-    id: "series",
-    title: "Series",
-    path: "/series",
-    genre: "series",
-    kind: "series"
-  },
-  {
-    id: "animes",
-    title: "Anime",
-    path: "/animes",
-    genre: "anime",
-    kind: "series"
-  },
-  {
-    id: "doramas",
-    title: "Doramas",
-    path: "/doramas",
-    genre: "series",
-    kind: "series"
-  }
+  { id: "peliculas", title: "Películas", path: "/peliculas", kind: "movie" },
+  { id: "series", title: "Series", path: "/series", kind: "series" },
+  { id: "animes", title: "Anime", path: "/animes", kind: "series" },
+  { id: "doramas", title: "Doramas", path: "/doramas", kind: "series" }
 ];
 
 const EMBED_HOSTS = [
@@ -69,26 +45,25 @@ function decodeHtml(value) {
     .replace(/&nbsp;/gi, " ")
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
-    .replace(/&#(\d+);/g, function (_, n) {
-      return String.fromCharCode(Number(n));
-    })
-    .replace(/&#x([0-9a-f]+);/gi, function (_, n) {
-      return String.fromCharCode(parseInt(n, 16));
-    });
+    .replace(/&#(\d+);/g, (_, n) =>
+      String.fromCharCode(Number(n))
+    )
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) =>
+      String.fromCharCode(parseInt(n, 16))
+    );
 }
 
 function cleanText(value) {
   return decodeHtml(String(value || "")
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]*>/g, " "))
+    .replace(/<[^>]+>/g, " "))
     .replace(/\s+/g, " ")
     .trim();
 }
 
 function getAttribute(html, name) {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
   const regex = new RegExp(
     escaped + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))",
     "i"
@@ -105,106 +80,132 @@ function slugFromUrl(url) {
   try {
     const parsed = new URL(url);
     const parts = parsed.pathname.split("/").filter(Boolean);
-    const slug = parts[parts.length - 1] || "titulo";
-
-    return slug
+    return parts.join("-")
       .toLowerCase()
       .replace(/[^a-z0-9_-]/g, "-")
       .replace(/-+/g, "-")
-      .slice(0, 110) || "titulo";
+      .slice(0, 120) || "titulo";
   } catch (_) {
     return "titulo";
   }
 }
 
-function getKind(url, fallback) {
-  const path = String(url || "").toLowerCase();
-
-  if (/\/pelicula\//.test(path)) return "movie";
-  if (/\/serie\//.test(path)) return "series";
-  if (/\/anime\//.test(path)) return "series";
-  if (/\/dorama\//.test(path)) return "series";
-
-  return fallback || "movie";
+function getPageNumber(url) {
+  try {
+    return Number(new URL(url).searchParams.get("page")) || 1;
+  } catch (_) {
+    return 1;
+  }
 }
 
-function getPoster(anchor, base) {
-  const image = anchor.match(/<img\b[^>]*>/i);
+function getContentKind(url) {
+  try {
+    const parts = new URL(url).pathname
+      .toLowerCase()
+      .split("/")
+      .filter(Boolean);
 
-  if (!image) return "";
+    if (parts.length < 2) return null;
 
-  const tag = image[0];
+    const section = parts[0];
 
-  const candidates = [
-    getAttribute(tag, "data-src"),
-    getAttribute(tag, "data-original"),
-    getAttribute(tag, "data-lazy-src"),
-    getAttribute(tag, "src")
-  ];
-
-  for (const candidate of candidates) {
-    if (candidate && !candidate.startsWith("data:image")) {
-      return absoluteUrl(candidate, base);
+    if (["pelicula", "peliculas"].includes(section)) {
+      return "movie";
     }
+
+    if (
+      ["serie", "series", "anime", "animes", "dorama", "doramas"]
+        .includes(section)
+    ) {
+      return "series";
+    }
+
+    return null;
+  } catch (_) {
+    return null;
   }
-
-  return "";
-}
-
-function getTitle(anchor, url) {
-  const image = anchor.match(/<img\b[^>]*>/i);
-  const imageTag = image ? image[0] : "";
-
-  const candidates = [
-    getAttribute(anchor, "title"),
-    getAttribute(anchor, "data-title"),
-    getAttribute(imageTag, "alt"),
-    getAttribute(imageTag, "title")
-  ];
-
-  for (const candidate of candidates) {
-    const title = cleanText(candidate);
-    if (title.length > 1) return title.slice(0, 200);
-  }
-
-  const text = cleanText(anchor);
-
-  if (text.length > 1) return text.slice(0, 200);
-
-  return slugFromUrl(url).replace(/[-_]/g, " ");
-}
-
-function getYear(text) {
-  const match = String(text || "").match(/\b(19\d{2}|20\d{2})\b/);
-  return match ? match[1] : undefined;
 }
 
 function isEpisodeUrl(url) {
   return /episodio|episode|temporada|season/i.test(url);
 }
 
-function isCatalogItemUrl(url) {
+function isDetailUrl(url) {
+  const kind = getContentKind(url);
+  if (!kind || isEpisodeUrl(url)) return false;
+
   try {
-    const parsed = new URL(url);
-    const parts = parsed.pathname.split("/").filter(Boolean);
-
-    if (parts.length < 2) return false;
-    if (isEpisodeUrl(url)) return false;
-
-    return /pelicula|serie|anime|dorama/i.test(parsed.pathname);
+    const parts = new URL(url).pathname.split("/").filter(Boolean);
+    return parts.length >= 2;
   } catch (_) {
     return false;
   }
 }
 
 // --------------------------------------------------
-// PETICIONES HTTP
+// IMÁGENES Y TÍTULOS
+// --------------------------------------------------
+
+function getImageFromAnchor(anchor, base) {
+  const image = anchor.match(/<img\b[^>]*>/i);
+  if (!image) return "";
+
+  const tag = image[0];
+
+  const values = [
+    getAttribute(tag, "data-src"),
+    getAttribute(tag, "data-original"),
+    getAttribute(tag, "data-lazy-src"),
+    getAttribute(tag, "src")
+  ];
+
+  for (const value of values) {
+    if (value && !/^data:image/i.test(value)) {
+      return absoluteUrl(value, base);
+    }
+  }
+
+  return "";
+}
+
+function getAnchorTitle(anchor, url) {
+  const image = anchor.match(/<img\b[^>]*>/i);
+  const imageTag = image ? image[0] : "";
+
+  const values = [
+    getAttribute(anchor, "title"),
+    getAttribute(anchor, "data-title"),
+    getAttribute(imageTag, "alt"),
+    getAttribute(imageTag, "title")
+  ];
+
+  for (const value of values) {
+    const title = cleanText(value);
+    if (title.length > 1) return title.slice(0, 200);
+  }
+
+  const text = cleanText(anchor);
+
+  if (text.length > 1) {
+    return text.slice(0, 200);
+  }
+
+  return slugFromUrl(url).replace(/[-_]/g, " ");
+}
+
+function getYear(value) {
+  const match = String(value || "").match(/\b(19\d{2}|20\d{2})\b/);
+  return match ? match[1] : undefined;
+}
+
+// --------------------------------------------------
+// PETICIONES
 // --------------------------------------------------
 
 async function getHtml(url) {
   const response = await kino.fetch(url, {
     headers: HEADERS,
-    timeoutMs: 18000
+    timeoutMs: 20000
   });
 
   if (response.status === 404) {
@@ -212,45 +213,50 @@ async function getHtml(url) {
   }
 
   if (response.status === 429) {
-    throw kino.error("rate_limited", "El sitio está limitando las peticiones");
+    throw kino.error("rate_limited", "Demasiadas peticiones");
   }
 
   if (!response.ok) {
     throw kino.error(
       "unavailable",
-      "PelisplusHD respondió con código " + response.status
+      "Error HTTP " + response.status
     );
   }
 
-  return response.text();
+  return await response.text();
 }
 
 // --------------------------------------------------
-// EXTRACCIÓN DE PELÍCULAS Y SERIES
+// EXTRACTOR GENERAL DEL CATÁLOGO
 // --------------------------------------------------
 
-function extractCards(html, fallbackKind, base) {
+function extractCards(html, base) {
   const results = [];
   const seen = new Set();
 
-  const anchors = String(html || "").match(
-    /<a\b[^>]*>[\s\S]*?<\/a>/gi
-  ) || [];
+  // Extrae enlaces individualmente. No exige que el enlace
+  // tenga una estructura concreta de tarjeta.
+  const anchorPattern = /<a\b[^>]*>[\s\S]*?<\/a>/gi;
 
-  for (const anchor of anchors) {
+  let match;
+
+  while ((match = anchorPattern.exec(String(html || ""))) !== null) {
+    const anchor = match[0];
     const href = getAttribute(anchor, "href");
+
     if (!href) continue;
 
     const url = absoluteUrl(href, base);
-    if (!url || !isCatalogItemUrl(url)) continue;
 
+    if (!url || !isDetailUrl(url)) continue;
     if (seen.has(url)) continue;
 
-    const title = getTitle(anchor, url);
+    const title = getAnchorTitle(anchor, url);
+
     if (!title || title.length < 2) continue;
 
-    const kind = getKind(url, fallbackKind);
-    const poster = getPoster(anchor, base);
+    const kind = getContentKind(url);
+    const poster = getImageFromAnchor(anchor, base);
     const year = getYear(cleanText(anchor));
 
     const item = {
@@ -273,16 +279,8 @@ function extractCards(html, fallbackKind, base) {
 }
 
 // --------------------------------------------------
-// PAGINACIÓN
+// PAGINACIÓN REAL
 // --------------------------------------------------
-
-function getPageNumber(url) {
-  try {
-    return Number(new URL(url).searchParams.get("page")) || 1;
-  } catch (_) {
-    return 1;
-  }
-}
 
 function findNextPage(html, currentUrl) {
   const anchors = String(html || "").match(
@@ -299,57 +297,62 @@ function findNextPage(html, currentUrl) {
     const url = absoluteUrl(href, currentUrl);
     if (!url) continue;
 
+    let parsed;
+
+    try {
+      parsed = new URL(url);
+    } catch (_) {
+      continue;
+    }
+
     const rel = getAttribute(anchor, "rel").toLowerCase();
     const text = cleanText(anchor).toLowerCase();
 
-    if (rel === "next" || /^(siguiente|next|›|»|→)$/.test(text)) {
+    if (
+      rel.split(/\s+/).includes("next") ||
+      /^(siguiente|next|›|»|→|>)$/.test(text)
+    ) {
       return url;
     }
 
-    try {
-      const parsed = new URL(url);
-      const page = Number(parsed.searchParams.get("page")) || 0;
+    const page = Number(parsed.searchParams.get("page")) || 0;
 
-      if (page > currentPage) {
-        candidates.push({
-          page: page,
-          url: url
-        });
-      }
-    } catch (_) {
-      // Enlace inválido: se ignora.
+    if (
+      page > currentPage &&
+      parsed.origin === new URL(currentUrl).origin &&
+      parsed.pathname === new URL(currentUrl).pathname
+    ) {
+      candidates.push({ page, url });
     }
   }
 
-  candidates.sort(function (a, b) {
-    return a.page - b.page;
-  });
+  candidates.sort((a, b) => a.page - b.page);
 
-  return candidates.length ? candidates[0].url : undefined;
+  if (candidates.length) {
+    return candidates[0].url;
+  }
+
+  return undefined;
 }
 
-function categoryFromRef(ref) {
-  if (!ref) return null;
+// --------------------------------------------------
+// CATEGORÍAS
+// --------------------------------------------------
 
-  const id = String(ref).replace(/^cat:/, "");
+function getCategory(ref) {
+  const id = String(ref || "").replace(/^cat:/, "");
 
-  return CATEGORIES.find(function (category) {
-    return category.id === id;
-  }) || null;
+  return CATEGORIES.find(category => category.id === id) || null;
 }
 
 async function loadCategory(category, cursor) {
   const url = cursor || absoluteUrl(category.path);
   const html = await getHtml(url);
 
-  const items = extractCards(
-    html,
-    category.kind,
-    url
-  );
+  const items = extractCards(html, url);
 
   return {
-    items: items.slice(0, 100),
+    items,
     next: findNextPage(html, url)
   };
 }
@@ -359,52 +362,37 @@ async function loadCategory(category, cursor) {
 // --------------------------------------------------
 
 export async function home() {
-  await null;
-
   const rows = [];
 
-  const pages = await Promise.all(
-    CATEGORIES.map(async function (category) {
-      try {
-        return {
-          category: category,
-          page: await loadCategory(category, null)
-        };
-      } catch (error) {
-        kino.log(
-          "Categoría no disponible:",
-          category.id,
-          error.code || "error"
-        );
+  for (const category of CATEGORIES) {
+    try {
+      const page = await loadCategory(category, null);
 
-        return null;
+      if (page.items.length > 0) {
+        rows.push({
+          id: category.id,
+          title: category.title,
+          ref: "cat:" + category.id,
+          items: page.items
+        });
       }
-    })
-  );
-
-  for (const result of pages) {
-    if (!result || !result.page.items.length) continue;
-
-    rows.push({
-      id: result.category.id,
-      title: result.category.title,
-      ref: "cat:" + result.category.id,
-      genre: result.category.genre,
-      items: result.page.items.slice(0, 60)
-    });
+    } catch (error) {
+      kino.log(
+        "Error cargando " + category.title,
+        error.code || "error"
+      );
+    }
   }
 
   return rows;
 }
 
 // --------------------------------------------------
-// EXPLORAR CATÁLOGO COMPLETO
+// EXPLORAR TODAS LAS PÁGINAS
 // --------------------------------------------------
 
 export async function browse(ref, cursor) {
-  await null;
-
-  const category = categoryFromRef(ref);
+  const category = getCategory(ref);
 
   if (!category) {
     throw kino.error("not_found", "Categoría no encontrada");
@@ -417,61 +405,48 @@ export async function browse(ref, cursor) {
 // BÚSQUEDA
 // --------------------------------------------------
 
-async function searchPage(url) {
-  const html = await getHtml(url);
-
-  return {
-    items: extractCards(html, "movie", url).slice(0, 100),
-    next: findNextPage(html, url)
-  };
-}
-
 export async function search(query) {
-  await null;
+  const term = String(
+    typeof query === "string"
+      ? query
+      : query && (query.q || query.query) || ""
+  ).trim();
 
-  const q = String(query && query.q || "").trim();
+  if (!term) return [];
 
-  if (!q) return [];
+  const cursor = query && typeof query === "object"
+    ? query.cursor
+    : null;
 
-  if (query && query.cursor) {
-    return searchPage(query.cursor);
+  if (cursor) {
+    const html = await getHtml(cursor);
+
+    return {
+      items: extractCards(html, cursor),
+      next: findNextPage(html, cursor)
+    };
   }
 
-  const terms = [q];
+  const searchUrls = [
+    absoluteUrl("/search?s=" + encodeURIComponent(term)),
+    absoluteUrl("/search/" + encodeURIComponent(term))
+  ];
 
-  if (query && query.originalTitle && query.originalTitle !== q) {
-    terms.push(query.originalTitle);
-  }
+  for (const url of searchUrls) {
+    try {
+      const html = await getHtml(url);
+      const items = extractCards(html, url);
 
-  if (query && Array.isArray(query.altTitles)) {
-    for (const title of query.altTitles.slice(0, 2)) {
-      if (title && !terms.includes(title)) {
-        terms.push(title);
+      if (items.length) {
+        return {
+          items,
+          next: findNextPage(html, url)
+        };
       }
-    }
-  }
+    } catch (error) {
+      if (error.code === "rate_limited") throw error;
 
-  for (const term of terms) {
-    const urls = [
-      absoluteUrl("/search?s=" + encodeURIComponent(term)),
-      absoluteUrl("/search/" + encodeURIComponent(term))
-    ];
-
-    for (const url of urls) {
-      try {
-        const result = await searchPage(url);
-
-        if (result.items.length) return result;
-      } catch (error) {
-        if (
-          error.code === "rate_limited" ||
-          error.code === "blocked"
-        ) {
-          return [];
-        }
-
-        kino.log("Búsqueda alternativa:", error.code || "error");
-      }
+      kino.log("Búsqueda alternativa:", error.code || "error");
     }
   }
 
@@ -479,45 +454,52 @@ export async function search(query) {
 }
 
 // --------------------------------------------------
-// DATOS DE LA PÁGINA DE UNA SERIE
+// DETALLES DE UNA FICHA
 // --------------------------------------------------
 
-function getPageTitle(html, fallback) {
+function getMetaContent(html, property) {
+  const tags = String(html || "").match(/<meta\b[^>]*>/gi) || [];
+
+  for (const tag of tags) {
+    const key =
+      getAttribute(tag, "property") ||
+      getAttribute(tag, "name");
+
+    if (key.toLowerCase() === property.toLowerCase()) {
+      return getAttribute(tag, "content");
+    }
+  }
+
+  return "";
+}
+
+function getDetailTitle(html, fallback) {
   const match = String(html || "").match(
     /<h1\b[^>]*>([\s\S]*?)<\/h1>/i
   );
 
-  return match
-    ? cleanText(match[1]).slice(0, 200)
-    : fallback || "Serie sin título";
+  if (match) return cleanText(match[1]);
+
+  return fallback || "Título sin nombre";
 }
 
-function getPagePoster(html, base) {
-  const tags = String(html || "").match(
-    /<meta\b[^>]*>/gi
-  ) || [];
+function getDetailPoster(html, base) {
+  const meta = getMetaContent(html, "og:image");
 
-  for (const tag of tags) {
-    const property =
-      getAttribute(tag, "property") ||
-      getAttribute(tag, "name");
+  if (meta) return absoluteUrl(meta, base);
 
-    if (/og:image|twitter:image/i.test(property)) {
-      const content = getAttribute(tag, "content");
-      if (content) return absoluteUrl(content, base);
-    }
-  }
+  const twitter = getMetaContent(html, "twitter:image");
 
-  const images = String(html || "").match(
-    /<img\b[^>]*>/gi
-  ) || [];
+  if (twitter) return absoluteUrl(twitter, base);
+
+  const images = String(html || "").match(/<img\b[^>]*>/gi) || [];
 
   for (const image of images) {
     const src =
       getAttribute(image, "data-src") ||
       getAttribute(image, "src");
 
-    if (src && !src.startsWith("data:image")) {
+    if (src && !/^data:image/i.test(src)) {
       return absoluteUrl(src, base);
     }
   }
@@ -525,17 +507,65 @@ function getPagePoster(html, base) {
   return "";
 }
 
+function getDetailDescription(html) {
+  const description =
+    getMetaContent(html, "description") ||
+    getMetaContent(html, "og:description");
+
+  if (description) return cleanText(description);
+
+  const match = String(html || "").match(
+    /<h[1-6][^>]*>\s*Sinopsis\s*<\/h[1-6]>([\s\S]{0,4000}?)(?:<h[1-6]|<footer)/i
+  );
+
+  if (match) return cleanText(match[1]);
+
+  return "Sin descripción disponible";
+}
+
+function getDetailGenres(html) {
+  const match = String(html || "").match(
+    /Géneros?\s*:\s*([\s\S]{0,1200}?)(?:<\/(?:div|p|li)>)/i
+  );
+
+  if (!match) return ["Sin clasificar"];
+
+  const links = match[1].match(/<a\b[^>]*>[\s\S]*?<\/a>/gi) || [];
+  const genres = links.map(cleanText).filter(Boolean);
+
+  return genres.length ? genres : ["Sin clasificar"];
+}
+
+function getDetailYear(html) {
+  const match = String(html || "").match(
+    /Año\s*:\s*(?:<[^>]+>\s*)*(19\d{2}|20\d{2})/i
+  );
+
+  return match ? match[1] : getYear(html);
+}
+
 // --------------------------------------------------
-// TEMPORADAS Y EPISODIOS
+// EPISODIOS
 // --------------------------------------------------
 
-function getEpisodeNumbers(url, title, fallbackNumber) {
+function isEpisodeAnchor(anchor, url) {
+  const title = cleanText(anchor);
+
+  return (
+    isEpisodeUrl(url) ||
+    /\bT\d+\s*[-–]\s*E\d+\b/i.test(title) ||
+    /\btemporada\s*\d+.*episodio\s*\d+/i.test(title)
+  );
+}
+
+function getEpisodeNumbers(url, title, fallback) {
   const source = url + " " + title;
 
   let season = 1;
   let number = 0;
 
-  const combined = source.match(/(\d+)\s*x\s*(\d+)/i);
+  const combined = source.match(/T(\d+)\s*[-–]\s*E(\d+)/i) ||
+    source.match(/(\d+)\s*x\s*(\d+)/i);
 
   if (combined) {
     season = Number(combined[1]);
@@ -543,44 +573,32 @@ function getEpisodeNumbers(url, title, fallbackNumber) {
   }
 
   if (!number) {
-    const seasonMatch = source.match(
-      /temporada[-_/\s]*(\d+)/i
-    );
-
-    const episodeMatch = source.match(
-      /episodio[-_/\s]*(\d+)/i
-    );
-
-    const sMatch = source.match(/s(\d{1,2})e(\d{1,3})/i);
-
-    if (seasonMatch) season = Number(seasonMatch[1]);
-    if (episodeMatch) number = Number(episodeMatch[1]);
-
-    if (sMatch) {
-      season = Number(sMatch[1]);
-      number = Number(sMatch[2]);
+    const sxe = source.match(/s(\d{1,2})e(\d{1,3})/i);
+    if (sxe) {
+      season = Number(sxe[1]);
+      number = Number(sxe[2]);
     }
   }
 
   if (!number) {
-    const textMatch = String(title || "").match(
-      /(?:episodio|episode|cap[ií]tulo)\s*(\d+)/i
+    const episode = source.match(
+      /(?:episodio|episode|cap[ií]tulo|e)\s*[-:#]?\s*(\d+)/i
     );
 
-    if (textMatch) number = Number(textMatch[1]);
+    if (episode) number = Number(episode[1]);
   }
 
-  if (!number) number = fallbackNumber;
+  if (!number) {
+    const label = String(title || "").match(/E(\d+)/i);
+    if (label) number = Number(label[1]);
+  }
 
-  return {
-    season: season >= 1 && season <= 999 ? season : 1,
-    number: number
-  };
+  if (!number) number = fallback;
+
+  return { season, number };
 }
 
 export async function episodes(ref) {
-  await null;
-
   const url = absoluteUrl(ref);
 
   if (!url) {
@@ -588,7 +606,6 @@ export async function episodes(ref) {
   }
 
   const html = await getHtml(url);
-
   const anchors = String(html || "").match(
     /<a\b[^>]*>[\s\S]*?<\/a>/gi
   ) || [];
@@ -601,12 +618,11 @@ export async function episodes(ref) {
     if (!href) continue;
 
     const episodeUrl = absoluteUrl(href, url);
+    if (!episodeUrl || seen.has(episodeUrl)) continue;
 
-    if (!episodeUrl || !isEpisodeUrl(episodeUrl)) continue;
-    if (seen.has(episodeUrl)) continue;
+    if (!isEpisodeAnchor(anchor, episodeUrl)) continue;
 
-    const title = getTitle(anchor, episodeUrl);
-
+    const title = getAnchorTitle(anchor, episodeUrl);
     const numbers = getEpisodeNumbers(
       episodeUrl,
       title,
@@ -615,45 +631,43 @@ export async function episodes(ref) {
 
     if (
       numbers.number < 1 ||
-      numbers.number > 99999
-    ) {
-      continue;
-    }
+      numbers.number > 9999
+    ) continue;
 
-    const episode = {
+    found.push({
       season: numbers.season,
       number: numbers.number,
-      title: title.slice(0, 200),
+      title,
       ref: episodeUrl
-    };
+    });
 
-    const poster = getPoster(anchor, url);
-    if (poster) episode.still = poster;
-
-    found.push(episode);
     seen.add(episodeUrl);
   }
 
-  found.sort(function (a, b) {
-    return a.season - b.season || a.number - b.number;
-  });
+  found.sort((a, b) =>
+    a.season - b.season || a.number - b.number
+  );
 
-  const seriesInfo = {
-    title: getPageTitle(html, "Serie"),
-    overview: "Sin descripción disponible"
+  const series = {
+    title: getDetailTitle(html, "Serie"),
+    overview: getDetailDescription(html),
+    genres: getDetailGenres(html)
   };
 
-  const poster = getPagePoster(html, url);
-  if (poster) seriesInfo.poster = poster;
+  const poster = getDetailPoster(html, url);
+  const year = getDetailYear(html);
+
+  if (poster) series.poster = poster;
+  if (year) series.year = year;
 
   return {
-    series: seriesInfo,
+    series,
     episodes: found
   };
 }
 
 // --------------------------------------------------
-// EXTRACCIÓN DE SERVIDORES DE REPRODUCCIÓN
+// REPRODUCTOR
 // --------------------------------------------------
 
 function isDirectVideo(url) {
@@ -664,9 +678,9 @@ function isAllowedEmbed(url) {
   try {
     const host = new URL(url).hostname.toLowerCase();
 
-    return EMBED_HOSTS.some(function (allowed) {
-      return host === allowed || host.endsWith("." + allowed);
-    });
+    return EMBED_HOSTS.some(domain =>
+      host === domain || host.endsWith("." + domain)
+    );
   } catch (_) {
     return false;
   }
@@ -675,14 +689,10 @@ function isAllowedEmbed(url) {
 function extractVideoSources(html, base) {
   const direct = [];
   const embeds = [];
-
-  const seenDirect = new Set();
-  const seenEmbeds = new Set();
+  const seen = new Set();
 
   const patterns = [
-    /<video\b[^>]*>/gi,
-    /<source\b[^>]*>/gi,
-    /<iframe\b[^>]*>/gi
+    /<(?:video|source|iframe)\b[^>]*>/gi
   ];
 
   for (const pattern of patterns) {
@@ -699,89 +709,40 @@ function extractVideoSources(html, base) {
       if (!raw) continue;
 
       const url = absoluteUrl(raw, base);
-      if (!url) continue;
+      if (!url || seen.has(url)) continue;
 
-      if (isDirectVideo(url) && !seenDirect.has(url)) {
+      if (isDirectVideo(url)) {
         direct.push(url);
-        seenDirect.add(url);
-      } else if (
-        isAllowedEmbed(url) &&
-        !seenEmbeds.has(url)
-      ) {
+        seen.add(url);
+      } else if (isAllowedEmbed(url)) {
         embeds.push(url);
-        seenEmbeds.add(url);
+        seen.add(url);
       }
     }
   }
 
-  // Busca también fuentes directas declaradas en scripts.
-  const scriptPattern =
-    /https?:\\?\/\\?\/[^"'\\\s<>]+?\.(?:m3u8|mp4|mpd)(?:\?[^"'\\\s<>]*)?/gi;
-
-  let scriptMatch;
-
-  while ((scriptMatch = scriptPattern.exec(html)) !== null) {
-    const raw = scriptMatch[0]
-      .replace(/\\\//g, "/")
-      .replace(/&amp;/g, "&");
-
-    const url = absoluteUrl(raw, base);
-
-    if (url && !seenDirect.has(url)) {
-      direct.push(url);
-      seenDirect.add(url);
-    }
-  }
-
-  // Algunos sitios guardan servidores en data-src.
-  const dataPattern = /data-src=["']([^"']+)["']/gi;
-  let dataMatch;
-
-  while ((dataMatch = dataPattern.exec(html)) !== null) {
-    const url = absoluteUrl(dataMatch[1], base);
-
-    if (
-      url &&
-      isAllowedEmbed(url) &&
-      !seenEmbeds.has(url)
-    ) {
-      embeds.push(url);
-      seenEmbeds.add(url);
-    }
-  }
-
-  return {
-    direct: direct,
-    embeds: embeds
-  };
+  return { direct, embeds };
 }
 
-// --------------------------------------------------
-// CAPTURA DEL REPRODUCTOR DE KINO
-// --------------------------------------------------
+async function capturePlayer(url, referer) {
+  if (!isAllowedEmbed(url)) {
+    throw kino.error("unavailable", "Servidor no permitido");
+  }
 
-async function capturePlayer(embedUrl, referer) {
   if (
     !kino.browser ||
     typeof kino.browser.capture !== "function"
   ) {
     throw kino.error(
       "unavailable",
-      "La captura del navegador de Kino no está disponible"
+      "Captura del navegador no disponible"
     );
   }
 
-  if (!isAllowedEmbed(embedUrl)) {
-    throw kino.error(
-      "unavailable",
-      "Servidor no permitido para captura"
-    );
-  }
-
-  const result = await kino.browser.capture(embedUrl, {
-    timeoutMs: 18000,
+  const result = await kino.browser.capture(url, {
+    timeoutMs: 20000,
     headers: {
-      "Referer": referer || BASE_URL + "/"
+      Referer: referer || BASE_URL + "/"
     }
   });
 
@@ -790,58 +751,19 @@ async function capturePlayer(embedUrl, referer) {
   if (!media.length || !media[0].url) {
     throw kino.error(
       "unavailable",
-      "El servidor no proporcionó un vídeo compatible"
+      "El reproductor no proporcionó una fuente compatible"
     );
   }
 
   const first = media[0];
 
-  const stream = {
+  return {
     url: first.url,
     headers: first.headers || {}
   };
-
-  if (first.mime) stream.mime = first.mime;
-
-  const alternatives = media.slice(1, 8)
-    .filter(function (item) {
-      return item && item.url;
-    })
-    .map(function (item) {
-      const alternative = {
-        url: item.url,
-        headers: item.headers || {}
-      };
-
-      if (item.mime) alternative.mime = item.mime;
-
-      return alternative;
-    });
-
-  if (alternatives.length) {
-    stream.alternatives = alternatives;
-  }
-
-  if (result.subtitles && result.subtitles.length) {
-    stream.subtitles = result.subtitles.map(function (sub) {
-      return {
-        lang: "es",
-        url: sub.url,
-        format: /\.srt(\?|$)/i.test(sub.url) ? "srt" : "vtt"
-      };
-    });
-  }
-
-  return stream;
 }
 
-// --------------------------------------------------
-// RESOLUCIÓN FINAL DE VÍDEO
-// --------------------------------------------------
-
 export async function resolve(ref) {
-  await null;
-
   const url = absoluteUrl(ref);
 
   if (!url) {
@@ -849,67 +771,24 @@ export async function resolve(ref) {
   }
 
   const html = await getHtml(url);
-
   const sources = extractVideoSources(html, url);
 
-  // Primera opción: fuente directa.
   if (sources.direct.length) {
-    const first = sources.direct[0];
-
-    const stream = {
-      url: first,
-      headers: {
-        "Referer": url
-      }
+    return {
+      url: sources.direct[0],
+      headers: { Referer: url },
+      alternatives: sources.direct.slice(1).map(videoUrl => ({
+        url: videoUrl,
+        headers: { Referer: url }
+      }))
     };
-
-    const alternatives = sources.direct
-      .slice(1, 8)
-      .map(function (videoUrl) {
-        return {
-          url: videoUrl,
-          headers: {
-            "Referer": url
-          }
-        };
-      });
-
-    if (alternatives.length) {
-      stream.alternatives = alternatives;
-    }
-
-    return stream;
   }
 
-  // Segunda opción: reproductores externos compatibles.
-  if (sources.embeds.length) {
-    let lastError = null;
-
-    for (const embed of sources.embeds.slice(0, 3)) {
-      try {
-        return await capturePlayer(embed, url);
-      } catch (error) {
-        lastError = error;
-
-        // No se intenta resolver verificaciones humanas.
-        if (
-          error.code === "blocked" ||
-          error.code === "not_allowed"
-        ) {
-          continue;
-        }
-
-        if (error.code === "busy") {
-          throw error;
-        }
-      }
-    }
-
-    if (lastError) {
-      throw kino.error(
-        "unavailable",
-        "No se pudo abrir ninguno de los reproductores disponibles"
-      );
+  for (const embed of sources.embeds) {
+    try {
+      return await capturePlayer(embed, url);
+    } catch (error) {
+      kino.log("Servidor no disponible:", error.code || "error");
     }
   }
 
