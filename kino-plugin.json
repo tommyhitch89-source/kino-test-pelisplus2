@@ -4,7 +4,7 @@
   "name": "PelisplusHD",
   "version": "1.1.1",
   "apiVersion": 13,
-  "description": "Catálogo de películas, series, anime y doramas de PelisplusHD con búsqueda local, selección de reproductores y verificación manual.",
+  "description": "Catálogo de películas, series, anime y doramas de PelisplusHD con búsqueda local y selección de reproductores.",
   "entry": "plugin.js",
   "hosts": [
     "pelisplushd.bz",
@@ -21,23 +21,14 @@
     "search",
     "browse",
     "episodes",
-    "resolve"
+    "resolve",
+    "catalog"
   ],
   "settings": [
     {
       "key": "captchaUrl",
-      "label": "Dirección del reproductor para verificación manual",
+      "label": "Dirección para verificación manual",
       "type": "text"
-    },
-    {
-      "key": "openCaptcha",
-      "label": "Abrir reproductor para verificación manual",
-      "type": "action"
     }
-  ],
-  "enhancements": {
-    "20": {
-      "visualBrowser": true
-    }
-  }
+  ]
 }
