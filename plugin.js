@@ -16,7 +16,7 @@ function fixUrl(url) {
 }
 
 function cleanTitle(raw) {
-  if (!raw) return "";
+  if (!raw || typeof raw !== "string") return "";
   return raw
     .replace(/<[^>]+>/g, " ")
     .replace(/^VER\s+/i, "")
@@ -29,7 +29,7 @@ function cleanTitle(raw) {
 function extractCards(html) {
   const items = [];
   const seen = new Set();
-  if (!html) return items;
+  if (!html || typeof html !== "string") return items;
 
   const cardRegex = /<a\b[^>]*href=["']([^"'#?]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   let match;
@@ -85,19 +85,21 @@ export async function home() {
   const rows = [];
   if (movies.length > 0) {
     rows.push({
+      id: "peliculas",
       title: "Películas recientes",
       items: movies.slice(0, 24)
     });
   }
   if (series.length > 0) {
     rows.push({
+      id: "series",
       title: "Series, Animes y Doramas",
       items: series.slice(0, 24)
     });
   }
 
   if (typeof kino.log === "function") {
-    kino.log("HOME filas enviadas: " + rows.length + " (" + allItems.length + " items)");
+    kino.log("HOME v1.0.7 -> " + rows.length + " filas (" + allItems.length + " items)");
   }
 
   return { rows: rows };
@@ -108,27 +110,50 @@ export async function search(input) {
   const cleanQ = query.trim();
   if (!cleanQ) return { items: [] };
 
-  const slugQ = cleanQ.toLowerCase().replace(/\s+/g, "-");
+  const lowerQ = cleanQ.toLowerCase();
+  const slugQ = lowerQ.replace(/\s+/g, "-");
+
   const urls = [
     BASE_URL + "/search?s=" + encodeURIComponent(cleanQ),
     BASE_URL + "/search/" + encodeURIComponent(slugQ),
-    BASE_URL + "/buscar/" + encodeURIComponent(slugQ)
+    BASE_URL + "/",
+    BASE_URL + "/peliculas",
+    BASE_URL + "/series",
+    BASE_URL + "/animes",
+    BASE_URL + "/doramas"
   ];
 
-  for (let i = 0; i < urls.length; i++) {
-    const res = await kino.fetch(urls[i], { headers: HEADERS });
-    if (res.ok) {
-      const found = extractCards(res.text());
-      if (typeof kino.log === "function") {
-        kino.log("SEARCH " + urls[i] + " -> " + found.length + " resultados");
-      }
-      if (found.length > 0) {
-        return { items: found };
+  const responses = await Promise.all(
+    urls.map(function (u) {
+      return kino.fetch(u, { headers: HEADERS }).catch(function () { return null; });
+    })
+  );
+
+  const results = [];
+  const seen = new Set();
+
+  for (let i = 0; i < responses.length; i++) {
+    const res = responses[i];
+    if (!res || !res.ok) continue;
+
+    const cards = extractCards(res.text());
+    for (let c = 0; c < cards.length; c++) {
+      const item = cards[c];
+      if (seen.has(item.ref)) continue;
+
+      // En las primeras 2 URLs (búsqueda directa) aceptamos todo; en las secciones filtramos por título
+      if (i < 2 || item.title.toLowerCase().includes(lowerQ)) {
+        seen.add(item.ref);
+        results.push(item);
       }
     }
   }
 
-  return { items: [] };
+  if (typeof kino.log === "function") {
+    kino.log("SEARCH v1.0.7 '" + cleanQ + "' -> " + results.length + " items");
+  }
+
+  return { items: results.slice(0, 40) };
 }
 
 export async function episodes(input) {
@@ -167,7 +192,7 @@ export async function episodes(input) {
   }
 
   if (typeof kino.log === "function") {
-    kino.log("EPISODES extraídos: " + list.length);
+    kino.log("EPISODES v1.0.7 -> " + list.length);
   }
 
   return { episodes: list };
@@ -209,7 +234,7 @@ export async function resolve(input) {
   }
 
   if (typeof kino.log === "function") {
-    kino.log("RESOLVE servidores encontrados: " + servers.length);
+    kino.log("RESOLVE v1.0.7 servidores: " + servers.length);
   }
 
   if (servers.length === 0) {
